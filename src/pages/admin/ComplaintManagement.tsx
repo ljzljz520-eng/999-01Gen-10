@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useStore } from '../../store/useStore';
 import { Plus, AlertTriangle, CheckCircle, XCircle, X, Ban, Check } from 'lucide-react';
@@ -6,7 +6,13 @@ import { formatDateTime, getComplaintStatusText, getComplaintStatusColor } from 
 import { Complaint } from '../../types';
 
 export const ComplaintManagement = () => {
-  const { reagents, complaints, addComplaint, updateComplaintStatus } = useStore();
+  const { reagents, complaints, addComplaint, updateComplaintStatus, fetchReagents, fetchComplaints } = useStore();
+
+  useEffect(() => {
+    fetchReagents();
+    fetchComplaints();
+  }, []);
+
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({
     batchNo: '',
@@ -29,11 +35,11 @@ export const ComplaintManagement = () => {
     setShowModal(false);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.batchNo || !formData.reporter || !formData.reason) return;
 
-    addComplaint({
+    await addComplaint({
       batchNo: formData.batchNo,
       reporter: formData.reporter,
       reason: formData.reason,
@@ -48,12 +54,12 @@ export const ComplaintManagement = () => {
     return reagents.find(r => r.batchNo === batchNo);
   };
 
-  const handleStatusUpdate = (
+  const handleStatusUpdate = async (
     id: string,
     status: Complaint['status'],
     stopUsage: boolean
   ) => {
-    updateComplaintStatus(id, status, stopUsage);
+    await updateComplaintStatus(id, status, stopUsage);
   };
 
   const sortedComplaints = [...complaints].sort(

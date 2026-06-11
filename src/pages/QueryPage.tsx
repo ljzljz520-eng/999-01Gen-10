@@ -5,16 +5,18 @@ import { useStore } from '../store/useStore';
 import { ReagentCard } from '../components/ReagentCard';
 import { OpeningRecordList } from '../components/OpeningRecordList';
 import { ComplaintWarning } from '../components/ComplaintWarning';
-import { Complaint } from '../types';
+import { OpeningRecord, Complaint } from '../types';
 
 export const QueryPage = () => {
   const navigate = useNavigate();
-  const { user, logout, searchReagent, getOpeningRecords, getComplaints, hasActiveComplaint, searchHistory } = useStore();
+  const { user, logout, searchReagent, fetchReagents, getOpeningRecords, getComplaintsByBatch, hasActiveComplaint, searchHistory } = useStore();
   const [searchInput, setSearchInput] = useState('');
   const [searchedBatch, setSearchedBatch] = useState<string | null>(null);
   const [reagent, setReagent] = useState<ReturnType<typeof searchReagent>>(undefined);
   const [notFound, setNotFound] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [openingRecords, setOpeningRecords] = useState<OpeningRecord[]>([]);
+  const [batchComplaints, setBatchComplaints] = useState<Complaint[]>([]);
 
   useEffect(() => {
     if (!user) {
@@ -22,7 +24,7 @@ export const QueryPage = () => {
     }
   }, [user, navigate]);
 
-  const handleSearch = (batchNo?: string) => {
+  const handleSearch = async (batchNo?: string) => {
     const query = batchNo || searchInput.trim();
     if (!query) return;
 
@@ -30,17 +32,20 @@ export const QueryPage = () => {
     setNotFound(false);
     setSearchedBatch(null);
 
-    setTimeout(() => {
-      const result = searchReagent(query);
-      if (result) {
-        setReagent(result);
-        setSearchedBatch(query);
-      } else {
-        setReagent(undefined);
-        setNotFound(true);
-      }
-      setIsSearching(false);
-    }, 500);
+    await fetchReagents();
+    const result = searchReagent(query);
+    if (result) {
+      setReagent(result);
+      setSearchedBatch(query);
+      const records = await getOpeningRecords(query);
+      setOpeningRecords(records);
+      const complaints = await getComplaintsByBatch(query);
+      setBatchComplaints(complaints);
+    } else {
+      setReagent(undefined);
+      setNotFound(true);
+    }
+    setIsSearching(false);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -50,7 +55,7 @@ export const QueryPage = () => {
   };
 
   const activeComplaints: Complaint[] = searchedBatch
-    ? getComplaints(searchedBatch).filter(c => c.stopUsage && c.status !== 'closed')
+    ? batchComplaints.filter(c => c.stopUsage && c.status !== 'closed')
     : [];
 
   if (!user) return null;
@@ -164,7 +169,7 @@ export const QueryPage = () => {
         {reagent && (
           <div className="space-y-6 animate-fade-in">
             <ReagentCard reagent={reagent} />
-            <OpeningRecordList records={getOpeningRecords(searchedBatch!)} />
+            <OpeningRecordList records={openingRecords} />
 
             {hasActiveComplaint(searchedBatch!) && (
               <div className="animate-slide-up rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -173,7 +178,7 @@ export const QueryPage = () => {
                   <h3 className="text-lg font-semibold text-gray-900">投诉记录</h3>
                 </div>
                 <div className="space-y-3">
-                  {getComplaints(searchedBatch!).map((complaint) => (
+                  {batchComplaints.map((complaint) => (
                     <div
                       key={complaint.id}
                       className={`rounded-xl p-4 ${

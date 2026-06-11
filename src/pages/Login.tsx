@@ -6,6 +6,8 @@ import { useStore } from '../store/useStore';
 export const Login = () => {
   const navigate = useNavigate();
   const login = useStore(state => state.login);
+  const fetchReagents = useStore(state => state.fetchReagents);
+  const fetchComplaints = useStore(state => state.fetchComplaints);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'experimenter' | 'admin'>('experimenter');
@@ -16,9 +18,8 @@ export const Login = () => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
-
-    setTimeout(() => {
-      const success = login(username, password);
+    try {
+      const success = await login(username, password);
       if (success) {
         const user = useStore.getState().user;
         if (role === 'admin' && user?.role !== 'admin') {
@@ -33,12 +34,17 @@ export const Login = () => {
           setIsLoading(false);
           return;
         }
+        await fetchReagents();
+        await fetchComplaints();
         navigate(role === 'admin' ? '/admin' : '/query');
       } else {
         setError('用户名或密码错误');
         setIsLoading(false);
       }
-    }, 800);
+    } catch {
+      setError('网络连接失败，请检查后端服务');
+      setIsLoading(false);
+    }
   };
 
   return (

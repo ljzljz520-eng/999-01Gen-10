@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useStore } from '../../store/useStore';
 import { Plus, Pencil, Trash2, FlaskConical, X, Check } from 'lucide-react';
@@ -6,11 +6,16 @@ import { Reagent } from '../../types';
 import { formatDate, getExpiryStatus } from '../../utils/format';
 
 export const ReagentManagement = () => {
-  const { reagents, addReagent, updateReagent, deleteReagent, hasActiveComplaint } = useStore();
+  const { reagents, addReagent, updateReagent, deleteReagent, hasActiveComplaint, fetchReagents, fetchComplaints } = useStore();
   const [showModal, setShowModal] = useState(false);
   const [editingReagent, setEditingReagent] = useState<Reagent | null>(null);
   const [formData, setFormData] = useState<Partial<Reagent>>({});
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchReagents();
+    fetchComplaints();
+  }, []);
 
   const handleOpenModal = (reagent?: Reagent) => {
     if (reagent) {
@@ -38,21 +43,21 @@ export const ReagentManagement = () => {
     setFormData({});
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.batchNo || !formData.name) return;
 
     if (editingReagent) {
-      updateReagent(editingReagent.batchNo, formData as Reagent);
+      await updateReagent(editingReagent.batchNo, formData as Reagent);
     } else {
-      addReagent(formData as Reagent);
+      await addReagent(formData as Reagent);
     }
     handleCloseModal();
   };
 
-  const handleDelete = (batchNo: string) => {
+  const handleDelete = async (batchNo: string) => {
     if (deleteConfirm === batchNo) {
-      deleteReagent(batchNo);
+      await deleteReagent(batchNo);
       setDeleteConfirm(null);
     } else {
       setDeleteConfirm(batchNo);

@@ -1,14 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useStore } from '../../store/useStore';
+import { api } from '../../api';
 import { Plus, Upload, History, FileText, X, Check, Download, Trash2, ArrowRight } from 'lucide-react';
 import { formatDateTime, formatFileSize } from '../../utils/format';
-import { QualityReport } from '../../types';
+import { QualityReport, Reagent } from '../../types';
 
 export const ReportManagement = () => {
   const navigate = useNavigate();
-  const { reagents, qualityReports, uploadReport, deleteReport, getReports } = useStore();
+  const { reagents, uploadReport, deleteReport, getReports, getNextVersion } = useStore();
+  const [reportGroups, setReportGroups] = useState<{ reagent: Reagent; reports: QualityReport[] }[]>([]);
+  const [nextVersion, setNextVersion] = useState('');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -17,16 +20,33 @@ export const ReportManagement = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
+  const fetchReportGroups = async () => {
+    const groups: { reagent: Reagent; reports: QualityReport[] }[] = [];
+    for (const reagent of reagents) {
+      const reports = await getReports(reagent.batchNo);
+      if (reports.length > 0) {
+        groups.push({ reagent, reports });
+      }
+    }
+    setReportGroups(groups);
+  };
+
+  useEffect(() => {
+    fetchReportGroups();
+  }, [reagents]);
+
   const handleOpenUpload = () => {
     setSelectedBatch(reagents[0]?.batchNo || '');
     setSelectedFile(null);
     setRemark('');
+    setNextVersion('');
     setShowUploadModal(true);
   };
 
   const handleCloseUpload = () => {
     setShowUploadModal(false);
     setSelectedFile(null);
+    setNextVersion('');
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,21 +65,34 @@ export const ReportManagement = () => {
     }
   };
 
+  const handleBatchChange = async (batchNo: string) => {
+    setSelectedBatch(batchNo);
+    if (batchNo) {
+      const version = await getNextVersion(batchNo);
+      setNextVersion(version);
+    } else {
+      setNextVersion('');
+    }
+  };
+
   const handleUpload = async () => {
     if (!selectedBatch || !selectedFile) return;
 
     setIsUploading(true);
-    setTimeout(() => {
-      uploadReport(selectedBatch, selectedFile, remark);
-      setIsUploading(false);
+    try {
+      await uploadReport(selectedBatch, selectedFile, remark);
+      await fetchReportGroups();
       handleCloseUpload();
-    }, 1000);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  const handleDelete = (reportId: string) => {
+  const handleDelete = async (reportId: string) => {
     if (deleteConfirm === reportId) {
-      deleteReport(reportId);
+      await deleteReport(reportId);
       setDeleteConfirm(null);
+      await fetchReportGroups();
     } else {
       setDeleteConfirm(reportId);
       setTimeout(() => setDeleteConfirm(null), 3000);
@@ -70,17 +103,12 @@ export const ReportManagement = () => {
     return reagents.find(r => r.batchNo === batchNo);
   };
 
-  const groupedReports = reagents.map(reagent => ({
-    reagent,
-    reports: getReports(reagent.batchNo),
-  })).filter(group => group.reports.length > 0);
-
   return (
     <AdminLayout title="质检报告管理">
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <p className="text-sm text-gray-500">
-            共 {qualityReports.length} 份质检报告，涉及 {groupedReports.length} 个批次
+            共 {reportGroups.reduce((sum, g) => sum + g.reports.length, 0)} 份质检报告，涉及 {reportGroups.length} 个批次
           </p>
           <button
             onClick={handleOpenUpload}
@@ -92,7 +120,7 @@ export const ReportManagement = () => {
         </div>
 
         <div className="space-y-6">
-          {groupedReports.map(({ reagent, reports }) => (
+          {reportGroups.map(({ reagent, reports }) => (
             <div key={reagent.batchNo} className="animate-slide-up overflow-hidden rounded-2xl bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-6 py-4">
                 <div>
@@ -145,6 +173,7 @@ export const ReportManagement = () => {
                     </div>
                     <div className="flex items-center gap-2">
                       <button
+                        onClick={() => window.open(api.getDownloadUrl(report.id), '_blank')}
                         className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600"
                         title="下载报告"
                       >
@@ -177,7 +206,7 @@ export const ReportManagement = () => {
             </div>
           ))}
 
-          {groupedReports.length === 0 && (
+          {reportGroups.length === 0 && (
             <div className="rounded-2xl border-2 border-dashed border-gray-300 bg-white p-12 text-center">
               <FileText className="mx-auto h-16 w-16 text-gray-300" />
               <h3 className="mt-4 text-lg font-medium text-gray-600">暂无质检报告</h3>
@@ -207,7 +236,7 @@ export const ReportManagement = () => {
                   </label>
                   <select
                     value={selectedBatch}
-                    onChange={(e) => setSelectedBatch(e.target.value)}
+                    onChange={(e) => handleBatchChange(e.target.value)}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm transition-all focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
                   >
                     {reagents.map((reagent) => (
@@ -268,14 +297,7 @@ export const ReportManagement = () => {
                   </label>
                   <input
                     type="text"
-                    value={selectedBatch ? (() => {
-                      const existing = getReports(selectedBatch);
-                      if (existing.length === 0) return 'v1.0';
-                      const last = existing[0].version;
-                      const match = last.match(/v(\d+)\.(\d+)/);
-                      if (match) return `v${match[1]}.${parseInt(match[2]) + 1}`;
-                      return 'v1.0';
-                    })() : ''}
+                    value={nextVersion}
                     disabled
                     className="w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-500"
                   />

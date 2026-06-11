@@ -1,16 +1,25 @@
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useStore } from '../../store/useStore';
+import { api } from '../../api';
 import { ArrowLeft, FileText, Download, Clock, User, MessageSquare, History } from 'lucide-react';
 import { formatDateTime, formatFileSize } from '../../utils/format';
+import { QualityReport } from '../../types';
 
 export const ReportVersions = () => {
   const navigate = useNavigate();
   const { batchNo } = useParams<{ batchNo: string }>();
   const { reagents, getReports } = useStore();
+  const [reports, setReports] = useState<QualityReport[]>([]);
 
   const reagent = reagents.find(r => r.batchNo === batchNo);
-  const reports = batchNo ? getReports(batchNo) : [];
+
+  useEffect(() => {
+    if (batchNo) {
+      getReports(batchNo).then(setReports);
+    }
+  }, [batchNo]);
 
   if (!reagent) {
     return (
@@ -122,6 +131,7 @@ export const ReportVersions = () => {
                     </div>
 
                     <button
+                      onClick={() => window.open(api.getDownloadUrl(report.id), '_blank')}
                       className="flex items-center gap-2 rounded-xl bg-primary-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-primary-600 hover:shadow-md"
                       title="下载报告"
                     >

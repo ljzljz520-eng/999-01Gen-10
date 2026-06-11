@@ -1,13 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Reagent, Complaint, OpeningRecord, QualityReport, User } from '../types';
-import {
-  mockReagents,
-  mockComplaints,
-  mockOpeningRecords,
-  mockQualityReports,
-  validateLogin,
-} from '../data/mockData';
+import { api } from '../api';
 
 interface AppState {
   user: User | null;
@@ -16,53 +10,42 @@ interface AppState {
   complaints: Complaint[];
   qualityReports: QualityReport[];
   searchHistory: string[];
-  login: (username: string, password: string) => boolean;
+  loading: boolean;
+
+  login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
+  fetchReagents: () => Promise<void>;
+  fetchComplaints: () => Promise<void>;
   searchReagent: (batchNo: string) => Reagent | undefined;
-  getOpeningRecords: (batchNo: string) => OpeningRecord[];
-  getComplaints: (batchNo: string) => Complaint[];
+  getOpeningRecords: (batchNo: string) => Promise<OpeningRecord[]>;
+  getComplaintsByBatch: (batchNo: string) => Promise<Complaint[]>;
   hasActiveComplaint: (batchNo: string) => boolean;
-  getReports: (batchNo: string) => QualityReport[];
-  uploadReport: (batchNo: string, file: File, remark?: string) => QualityReport;
-  addComplaint: (complaint: Omit<Complaint, 'id'>) => Complaint;
-  addReagent: (reagent: Reagent) => void;
-  updateReagent: (batchNo: string, data: Partial<Reagent>) => void;
-  deleteReagent: (batchNo: string) => boolean;
-  updateComplaintStatus: (id: string, status: Complaint['status'], stopUsage: boolean) => void;
-  updateReport: (reportId: string, data: Partial<QualityReport>) => void;
-  deleteReport: (reportId: string) => boolean;
+  getReports: (batchNo: string) => Promise<QualityReport[]>;
+  uploadReport: (batchNo: string, file: File, remark: string) => Promise<QualityReport | null>;
+  addComplaint: (complaint: Omit<Complaint, 'id'>) => Promise<boolean>;
+  addReagent: (reagent: Reagent) => Promise<boolean>;
+  updateReagent: (batchNo: string, data: Partial<Reagent>) => Promise<boolean>;
+  deleteReagent: (batchNo: string) => Promise<boolean>;
+  updateComplaintStatus: (id: string, status: Complaint['status'], stopUsage: boolean) => Promise<boolean>;
+  deleteReport: (reportId: string) => Promise<boolean>;
+  getNextVersion: (batchNo: string) => Promise<string>;
 }
-
-const generateId = () =>
-  Math.random().toString(36).substring(2, 11).toUpperCase();
-
-const generateNextVersion = (existingReports: QualityReport[], isMajor: boolean = false): string => {
-  if (existingReports.length === 0) return 'v1.0';
-  const lastVersion = existingReports[existingReports.length - 1].version;
-  const match = lastVersion.match(/v(\d+)\.(\d+)/);
-  if (!match) return 'v1.0';
-  const major = parseInt(match[1]);
-  const minor = parseInt(match[2]);
-  if (isMajor) {
-    return `v${major + 1}.0`;
-  }
-  return `v${major}.${minor + 1}`;
-};
 
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
       user: null,
-      reagents: mockReagents,
-      openingRecords: mockOpeningRecords,
-      complaints: mockComplaints,
-      qualityReports: mockQualityReports,
+      reagents: [],
+      openingRecords: [],
+      complaints: [],
+      qualityReports: [],
       searchHistory: [],
+      loading: false,
 
-      login: (username, password) => {
-        const user = validateLogin(username, password);
-        if (user) {
-          set({ user });
+      login: async (username, password) => {
+        const result = await api.login(username, password);
+        if (result.success && result.user) {
+          set({ user: result.user });
           return true;
         }
         return false;
@@ -70,6 +53,16 @@ export const useStore = create<AppState>()(
 
       logout: () => {
         set({ user: null });
+      },
+
+      fetchReagents: async () => {
+        const reagents = await api.getReagents();
+        set({ reagents });
+      },
+
+      fetchComplaints: async () => {
+        const complaints = await api.getComplaints();
+        set({ complaints });
       },
 
       searchReagent: (batchNo) => {
@@ -83,16 +76,14 @@ export const useStore = create<AppState>()(
         return reagent;
       },
 
-      getOpeningRecords: (batchNo) => {
-        return get().openingRecords
-          .filter(r => r.batchNo === batchNo)
-          .sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+      getOpeningRecords: async (batchNo) => {
+        const records = await api.getOpeningRecords(batchNo);
+        return records;
       },
 
-      getComplaints: (batchNo) => {
-        return get().complaints
-          .filter(c => c.batchNo === batchNo)
-          .sort((a, b) => new Date(b.reportedAt).getTime() - new Date(a.reportedAt).getTime());
+      getComplaintsByBatch: async (batchNo) => {
+        const complaints = await api.getComplaints(batchNo);
+        return complaints;
       },
 
       hasActiveComplaint: (batchNo) => {
@@ -101,90 +92,77 @@ export const useStore = create<AppState>()(
         );
       },
 
-      getReports: (batchNo) => {
-        return get().qualityReports
-          .filter(r => r.batchNo === batchNo)
-          .sort((a, b) => b.version.localeCompare(a.version));
+      getReports: async (batchNo) => {
+        const reports = await api.getReports(batchNo);
+        return reports;
       },
 
-      uploadReport: (batchNo, file, remark) => {
-        const { qualityReports, user } = get();
-        const existingReports = get().getReports(batchNo);
-        const newReport: QualityReport = {
-          id: `RPT-${generateId()}`,
-          batchNo,
-          version: generateNextVersion(existingReports),
-          uploadedAt: new Date().toISOString(),
-          uploadedBy: user?.name || '未知用户',
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type,
-          remark,
-        };
-        set({ qualityReports: [...qualityReports, newReport] });
-        return newReport;
+      uploadReport: async (batchNo, file, remark) => {
+        const { user } = get();
+        const result = await api.uploadReport(batchNo, file, remark, user?.name || '未知用户');
+        if (result.success && result.report) {
+          return result.report;
+        }
+        return null;
       },
 
-      addComplaint: (complaint) => {
-        const { complaints } = get();
-        const newComplaint: Complaint = {
-          ...complaint,
-          id: `CMP-${generateId()}`,
-        };
-        set({ complaints: [...complaints, newComplaint] });
-        return newComplaint;
+      addComplaint: async (complaint) => {
+        const result = await api.addComplaint(complaint);
+        if (result.success) {
+          await get().fetchComplaints();
+          return true;
+        }
+        return false;
       },
 
-      addReagent: (reagent) => {
-        set(state => ({
-          reagents: [...state.reagents, reagent],
-        }));
+      addReagent: async (reagent) => {
+        const success = await api.addReagent(reagent);
+        if (success) {
+          await get().fetchReagents();
+          return true;
+        }
+        return false;
       },
 
-      updateReagent: (batchNo, data) => {
-        set(state => ({
-          reagents: state.reagents.map(r =>
-            r.batchNo === batchNo ? { ...r, ...data } : r
-          ),
-        }));
+      updateReagent: async (batchNo, data) => {
+        const success = await api.updateReagent(batchNo, data);
+        if (success) {
+          await get().fetchReagents();
+          return true;
+        }
+        return false;
       },
 
-      deleteReagent: (batchNo) => {
-        set(state => ({
-          reagents: state.reagents.filter(r => r.batchNo !== batchNo),
-        }));
-        return true;
+      deleteReagent: async (batchNo) => {
+        const success = await api.deleteReagent(batchNo);
+        if (success) {
+          await get().fetchReagents();
+          return true;
+        }
+        return false;
       },
 
-      updateComplaintStatus: (id, status, stopUsage) => {
-        set(state => ({
-          complaints: state.complaints.map(c =>
-            c.id === id ? { ...c, status, stopUsage } : c
-          ),
-        }));
+      updateComplaintStatus: async (id, status, stopUsage) => {
+        const success = await api.updateComplaintStatus(id, status, stopUsage);
+        if (success) {
+          await get().fetchComplaints();
+          return true;
+        }
+        return false;
       },
 
-      updateReport: (reportId, data) => {
-        set(state => ({
-          qualityReports: state.qualityReports.map(r =>
-            r.id === reportId ? { ...r, ...data } : r
-          ),
-        }));
+      deleteReport: async (reportId) => {
+        const success = await api.deleteReport(reportId);
+        return success;
       },
 
-      deleteReport: (reportId) => {
-        set(state => ({
-          qualityReports: state.qualityReports.filter(r => r.id !== reportId),
-        }));
-        return true;
+      getNextVersion: async (batchNo) => {
+        return await api.getNextVersion(batchNo);
       },
     }),
     {
       name: 'reagent-system-storage',
       partialize: (state) => ({
-        reagents: state.reagents,
-        complaints: state.complaints,
-        qualityReports: state.qualityReports,
         searchHistory: state.searchHistory,
       }),
     }
